@@ -66,7 +66,6 @@ void S3Source::setup(ServerInterface &srvInterface) {
 }
 
 void S3Source::destroy(ServerInterface &srvInterface) {
-    //delete[] buffer;
     Aws::ShutdownAPI(options);
 }
 
@@ -83,7 +82,7 @@ class s3SourceFactory : public SourceFactory {
 public:
 
     virtual void plan(ServerInterface &srvInterface,
-                      NodeSpecifyingPlanContext &planCtxt) {
+                      NodeSpecifyingPlanContext &planCtx) {
         std::vector<std::string> args = srvInterface.getParamReader().getParamNames();
 
         /* Check parameters */
@@ -91,21 +90,76 @@ public:
             vt_report_error(0, "Must have exactly one argument, 'url'");
         }
 
-        /* Populate planData */
-        planCtxt.getWriter().getLongStringRef("url").copy(srvInterface.getParamReader().getStringRef("url"));
+        Vertica::ParamWriter &pwriter = planCtx.getWriter();
 
-        /* Munge nodes list */
-        std::vector<std::string> executionNodes = planCtxt.getClusterNodes();
-        while (executionNodes.size() > 1) executionNodes.pop_back();  // Only run on one node.  Don't care which.
-        planCtxt.setTargetNodes(executionNodes);
+        const std::vector<std::string>& nodes = planCtx.getTargetNodes();
+
+        // Keep track of which nodes actually have something useful to do
+        std::set<size_t> usedNodes;
+
+        // Get the files that the source has
+        std::vector<std::string> files;
+        std::string s = srvInterface.getParamReader().getStringRef("url").str();
+        std::string delimiter = "|";
+        size_t pos = 0;
+        std::string token;
+        while ((pos = s.find(delimiter)) != std::string::npos) {
+            token = s.substr(0, pos);
+            files.push_back(token);
+            s.erase(0, pos + delimiter.length());
+        }
+        files.push_back(s);
+
+        // Assign the files to the nodes in round robin fashion
+        size_t nodeIdx = 0;
+        std::stringstream ss;
+        for (size_t i=0; i<files.size(); ++i) {
+            // Param named nodename:i, value is file name
+            ss.str("");
+            ss << nodes[nodeIdx] << ":" << i;
+            const std::string fieldName = ss.str();
+
+            // Set the appropriate field
+            pwriter.getStringRef(fieldName).copy(files[i]);
+
+            // select next node, wrapping as necessary
+            usedNodes.insert(nodeIdx);
+            nodeIdx = (nodeIdx+1) % nodes.size();
+        }
+
+        // Set which nodes should be used
+        std::vector<std::string> usedNodesStr;
+        for (std::set<size_t>::iterator it = usedNodes.begin(); it != usedNodes.end(); ++it)  {
+            usedNodesStr.push_back(nodes[*it]);
+        }
+        planCtx.setTargetNodes(usedNodesStr);
     }
 
 
     virtual std::vector<UDSource*> prepareUDSources(ServerInterface &srvInterface,
-                                                    NodeSpecifyingPlanContext &planCtxt) {
-        std::vector<UDSource*> retVal;
-        retVal.push_back(vt_createFuncObject<S3Source>(srvInterface.allocator,
-                                                         planCtxt.getReader().getStringRef("url").str()));
+                                                    NodeSpecifyingPlanContext &planCtx) {
+
+        const std::string nodeName = srvInterface.getCurrentNodeName();
+
+        std::vector<Vertica::UDSource*> retVal;
+
+        // Find all the files destined for this node
+        Vertica::ParamReader &preader = planCtx.getReader();
+
+        std::vector<std::string> paramNames = preader.getParamNames();
+        for (std::size_t i=0; i<paramNames.size(); ++i)
+        {
+            const std::string &paramName = paramNames[i];
+
+            // if the param name starts with this node name, get the value
+            // (which is a filename) and make a new source for reading that file
+            size_t pos = paramName.find(nodeName);
+            if (pos == 0) {
+                std::string s3path = preader.getStringRef(paramName).str();
+                retVal.push_back(Vertica::vt_createFuncObject<S3Source>(srvInterface.allocator, s3path));
+            }
+        }
+
         return retVal;
     }
 

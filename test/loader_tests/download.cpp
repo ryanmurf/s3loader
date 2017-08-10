@@ -80,7 +80,7 @@ TEST(library, download) {
     MockVTAllocator mockVTAllocator;
     ServerInterface::LoggingFunc func;
     MockServerImpl mockServer(&mockVTAllocator, func, std::string("string"), 0);
-    S3Source s3Source("");
+    S3Source s3Source("s3://domodatahubdev3/dev/393a99da-2339-4890-9b7d-64d932418600/delimited/v1/1/6-384");
     s3Source.setup(mockServer);
 
     DataBuffer dataBuffer;
@@ -89,7 +89,7 @@ TEST(library, download) {
     dataBuffer.offset = 0;
     dataBuffer.size = 10240;
 
-    FILE* file = fopen( "test.bin", "wb" );
+    FILE* file = fopen( "/Users/ryanmurphy/CLionProjects/s3Loader/test.bin", "wb" );
 
     while(s3Source.processWithMetadata(mockServer, dataBuffer, lengthBuffer) == OUTPUT_NEEDED) {
         size_t read = 0;
