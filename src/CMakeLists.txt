@@ -1,14 +1,16 @@
 project(s3loader)
 set(CMAKE_CXX_STANDARD 11)
-set(aws-sdk-cpp_DIR ~/CLionProjects/aws-sdk-cpp/)
+set(aws-sdk-cpp_DIR ${CMAKE_SOURCE_DIR}/../aws-sdk-cpp/)
 
 find_package(aws-sdk-cpp)
 add_definitions(-DUSE_IMPORT_EXPORT)
 
-LINK_DIRECTORIES(/usr/local/Cellar/gettext/0.19.8.1/lib/)
-find_package (Intl)
-if (Intl_FOUND)
-    include_directories (${Intl_INCLUDE_DIRS})
+IF(APPLE)
+    LINK_DIRECTORIES(/usr/local/Cellar/gettext/0.19.8.1/lib/)
+    find_package (Intl)
+    if (Intl_FOUND)
+        include_directories (${Intl_INCLUDE_DIRS})
+    endif()
 endif()
 
 include_directories(/opt/vertica/sdk/include/)

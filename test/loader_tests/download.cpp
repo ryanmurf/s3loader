@@ -11,7 +11,10 @@ public:
     MockVTAllocator() {
 
     }
-    MOCK_METHOD1(alloc, void*(size_t size));
+    //MOCK_METHOD1(alloc, void*(size_t size));
+    void *alloc(size_t size) {
+        return std::malloc(size);
+    }
 };
 
 class MockUDFileOperator : Vertica::UDFileOperator {
@@ -53,7 +56,10 @@ public:
     MockServerImpl(VTAllocator *allocator, LoggingFunc func, const std::string &sqlName, vint udxDebugLogLevel = 0)
             : ServerInterface(allocator, func, sqlName, udxDebugLogLevel) {
     }
-
+    MockServerImpl(VTAllocator *allocator, LoggingFunc func, const std::string &sqlName, const ParamReader& paramReader, vint udxDebugLogLevel = 0)
+            : ServerInterface(allocator, func, sqlName, paramReader, udxDebugLogLevel) {
+    }
+    //MOCK_METHOD0(getParamReader, ParamReader());
     MOCK_METHOD1(getFileSystem, UDFileSystem*(const char *path));
     MOCK_CONST_METHOD1(getFileSystem, UDFileSystem*(const char *pat));
     MOCK_METHOD2(describeFunction, bool(FunctionDescription &func, bool errorIfNotFound));
@@ -68,6 +74,32 @@ public:
     MOCK_METHOD1(listBlobs, std::vector<BlobDescription>(BlobIdentifier::Namespace nsp));
 };
 
+class MockParamReader: public ParamReader {
+public:
+    MockParamReader(std::map<std::string, size_t> paramNameToIndex, std::vector<char *> cols, std::vector<VString> svWrappers) {
+        this->cols = cols;
+        this->paramNameToIndex = paramNameToIndex;
+        this->svWrappers = svWrappers;
+    }
+    //MOCK_METHOD0(getParamNames, std::vector<std::string>());
+};
+
+class MockParamWriter: public ParamWriter {
+public:
+    MockParamWriter(VTAllocator *allocator = NULL) : ParamWriter(allocator) {}
+
+
+};
+
+class MockNodeSpecifyingPlanContext: public NodeSpecifyingPlanContext {
+public:
+    MockNodeSpecifyingPlanContext(ParamWriter& writer, std::vector<std::string> clusterNodes, bool canApportion)
+            : NodeSpecifyingPlanContext(writer, clusterNodes, canApportion) {}
+    //MOCK_CONST_METHOD0(canApportionSource, bool());
+    //MOCK_CONST_METHOD0(getTargetNodes, std::vector<std::string>&());
+    //MOCK_METHOD1(setTargetNodes, void(const std::vector<std::string>& nodes));
+};
+
 TEST(library, construct) {
     S3Source s3Source("s3://datahub/path/to/s3");
     ASSERT_EQ(std::string(s3Source.getBucket().c_str()), std::string("datahub"));
@@ -75,12 +107,11 @@ TEST(library, construct) {
 }
 
 
-
 TEST(library, download) {
     MockVTAllocator mockVTAllocator;
     ServerInterface::LoggingFunc func;
     MockServerImpl mockServer(&mockVTAllocator, func, std::string("string"), 0);
-    S3Source s3Source("s3://domodatahubdev3/dev/393a99da-2339-4890-9b7d-64d932418600/delimited/v1/1/6-384");
+    S3Source s3Source("");
     s3Source.setup(mockServer);
 
     DataBuffer dataBuffer;
@@ -89,7 +120,7 @@ TEST(library, download) {
     dataBuffer.offset = 0;
     dataBuffer.size = 10240;
 
-    FILE* file = fopen( "/Users/ryanmurphy/CLionProjects/s3Loader/test.bin", "wb" );
+    FILE* file = fopen( "test.bin", "wb" );
 
     while(s3Source.processWithMetadata(mockServer, dataBuffer, lengthBuffer) == OUTPUT_NEEDED) {
         size_t read = 0;
@@ -101,4 +132,45 @@ TEST(library, download) {
     delete dataBuffer.buf;
     fclose(file);
     s3Source.destroy(mockServer);
+}
+
+TEST(library, plan) {
+    MockVTAllocator mockVTAllocator;
+    ServerInterface::LoggingFunc func;
+
+    std::map<std::string, size_t> paramNameToIndex;
+    paramNameToIndex["url"] = 1;
+    std::vector<char *> cols;
+
+    std::vector<VString> svWrappers;
+    svWrappers.push_back(VString(NULL, NULL, StringNull));
+    svWrappers.push_back(VString(NULL, NULL, StringNull));
+
+    char temp[] = "s3://bucket/path1|s3://bucket/path2";
+    EE::StringValue *val = (EE::StringValue *)malloc(sizeof(EE::StringValue) + 36 * sizeof(char));
+    val->slen = 35;
+    val->sloc = 0;
+    std::memcpy(&val->base, &temp[0], sizeof(temp));
+    char temp1[] = "";
+    cols.push_back(&temp1[0]);
+    cols.push_back(reinterpret_cast<char*>(val));
+    MockParamReader mockParamReader(paramNameToIndex,cols,svWrappers);
+    MockServerImpl mockServer(&mockVTAllocator, func, std::string("string"), mockParamReader, 0);
+
+    MockParamWriter mockParamWriter(&mockVTAllocator);
+
+    std::vector<std::string> clusterNodes;
+    clusterNodes.push_back("node_a");
+    clusterNodes.push_back("node_b");
+
+    MockNodeSpecifyingPlanContext mockNodeSpecifyingPlanContext(mockParamWriter, clusterNodes, true);
+
+    std::cout << "Starting test" << std::endl;
+    S3SourceFactory s3SourceFactory;
+    s3SourceFactory.plan(mockServer, mockNodeSpecifyingPlanContext);
+
+    GTEST_ASSERT_EQ(mockNodeSpecifyingPlanContext.getTargetNodes().size(), 2);
+    GTEST_ASSERT_EQ(mockNodeSpecifyingPlanContext.getWriter().getParamNames().size(), 2);
+    GTEST_ASSERT_EQ(mockNodeSpecifyingPlanContext.getWriter().getStringRef("node_a:0").str(), "s3://bucket/path1");
+    GTEST_ASSERT_EQ(mockNodeSpecifyingPlanContext.getWriter().getStringRef("node_b:1").str(), "s3://bucket/path2");
 }

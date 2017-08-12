@@ -78,7 +78,7 @@ Aws::String S3Source::getKey() {
 }
 
 
-class s3SourceFactory : public SourceFactory {
+class S3SourceFactory : public SourceFactory {
 public:
 
     virtual void plan(ServerInterface &srvInterface,
@@ -168,4 +168,4 @@ public:
         parameterTypes.addLongVarchar(30000000, "url");
     }
 };
-RegisterFactory(s3SourceFactory);
+RegisterFactory(S3SourceFactory);
