@@ -1,4 +1,4 @@
-set(aws-sdk-cpp_DIR ~/CLionProjects/aws-sdk-cpp/)
+set(aws-sdk-cpp_DIR ${CMAKE_SOURCE_DIR}/../aws-sdk-cpp/)
 
 IF(APPLE)
     LINK_DIRECTORIES(/usr/local/Cellar/gettext/0.19.8.1/lib/)
