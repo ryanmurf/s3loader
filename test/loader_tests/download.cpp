@@ -59,6 +59,10 @@ public:
     MockServerImpl(VTAllocator *allocator, LoggingFunc func, const std::string &sqlName, const ParamReader& paramReader, vint udxDebugLogLevel = 0)
             : ServerInterface(allocator, func, sqlName, paramReader, udxDebugLogLevel) {
     }
+    MockServerImpl(VTAllocator *allocator, LoggingFunc func, const std::string &sqlName, const ParamReader& paramReader, const ParamReader& sessionParamReader, vint udxDebugLogLevel = 0)
+            : ServerInterface(allocator, func, sqlName, paramReader, udxDebugLogLevel) {
+        this->sessionParamReader = sessionParamReader;
+    }
     //MOCK_METHOD0(getParamReader, ParamReader());
     MOCK_METHOD1(getFileSystem, UDFileSystem*(const char *path));
     MOCK_CONST_METHOD1(getFileSystem, UDFileSystem*(const char *pat));
@@ -108,9 +112,50 @@ TEST(library, construct) {
 
 
 TEST(library, download) {
+    //id
+    char id[] = "";
+    EE::StringValue *sId = (EE::StringValue *)malloc(sizeof(EE::StringValue) + sizeof(id) * sizeof(char) + 1);
+    sId->slen = sizeof(id) - 1;
+    sId->sloc = 0;
+    std::memcpy(&sId->base, &id[0], sizeof(id));
+    //secret
+    char secret[] = "";
+    EE::StringValue *sSecret = (EE::StringValue *)malloc(sizeof(EE::StringValue) + sizeof(secret) * sizeof(char) + 1);
+    sSecret->slen = sizeof(secret) - 1;
+    sSecret->sloc = 0;
+    std::memcpy(&sSecret->base, &secret[0], sizeof(secret));
+    //verbose
+    vbool bVerbose = true;
+
+    //endpoint
+    char endpoint[] = "";
+    EE::StringValue *sEndpoint = (EE::StringValue *)malloc(sizeof(EE::StringValue) + sizeof(endpoint) * sizeof(char) + 1);
+    sEndpoint->slen = sizeof(endpoint) - 1;
+    sEndpoint->sloc = 0;
+    std::memcpy(&sEndpoint->base, &endpoint[0], sizeof(endpoint));
+
+    std::map<std::string, size_t> paramNameToIndex;
+    paramNameToIndex["aws_id"] = 0;
+    paramNameToIndex["aws_secret"] = 1;
+    paramNameToIndex["aws_verbose"] = 2;
+    paramNameToIndex["aws_endpoint"] = 3;
+
+    std::vector<VString> svWrappers;
+    svWrappers.push_back(VString(NULL, NULL, StringNull));
+    svWrappers.push_back(VString(NULL, NULL, StringNull));
+    svWrappers.push_back(VString(NULL, NULL, StringNull));
+    svWrappers.push_back(VString(NULL, NULL, StringNull));
+
+    std::vector<char *> cols;
+    cols.push_back(reinterpret_cast<char*>(sId));
+    cols.push_back(reinterpret_cast<char*>(sSecret));
+    cols.push_back(reinterpret_cast<char*>(&bVerbose));
+    cols.push_back(reinterpret_cast<char*>(sEndpoint));
+    MockParamReader mockParamReader(paramNameToIndex,cols,svWrappers);
+
     MockVTAllocator mockVTAllocator;
     ServerInterface::LoggingFunc func;
-    MockServerImpl mockServer(&mockVTAllocator, func, std::string("string"), 0);
+    MockServerImpl mockServer(&mockVTAllocator, func, std::string("string"), mockParamReader, mockParamReader, 0);
     S3Source s3Source("");
     s3Source.setup(mockServer);
 

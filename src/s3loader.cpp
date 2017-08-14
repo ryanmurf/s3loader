@@ -27,7 +27,15 @@ StreamState S3Source::process(ServerInterface &srvInterface, DataBuffer &output)
 }
 
 void S3Source::setup(ServerInterface &srvInterface) {
-    std::cout << "Setting up API" << std::endl;
+    std::string id = srvInterface.getSessionParamReader().getStringRef("aws_id").str();
+    std::string secret = srvInterface.getSessionParamReader().getStringRef("aws_secret").str();
+    verbose = srvInterface.getSessionParamReader().getBoolRef("aws_verbose");
+    std::string endpoint = srvInterface.getSessionParamReader().getStringRef("aws_endpoint").str();
+
+    if (verbose) {
+        std::cout << "Setting up API for " << key_name << std::endl;
+    }
+
     Aws::InitAPI(options);
 
     Aws::Client::ClientConfiguration clientConfig;
@@ -35,11 +43,20 @@ void S3Source::setup(ServerInterface &srvInterface) {
     clientConfig.region = Aws::Region::US_EAST_1;
     clientConfig.connectTimeoutMs = 5000;
     clientConfig.requestTimeoutMs = 15000;
+    if (!endpoint.empty()) {
+        clientConfig.endpointOverride = Aws::Utils::StringUtils::to_string(endpoint);
+    }
 
-    std::cout << "Initializing client" << std::endl;
-    Aws::S3::S3Client client = Aws::S3::S3Client(clientConfig);
+    if (verbose) {
+        std::cout << "Initializing client for " << key_name << std::endl;
+    }
 
+    Aws::Auth::AWSCredentials credentials(Aws::Utils::StringUtils::to_string(id),
+                                          Aws::Utils::StringUtils::to_string(secret));
+    Aws::S3::S3Client client = (!id.empty() && !secret.empty()) ? Aws::S3::S3Client(credentials, clientConfig)
+                                                                : Aws::S3::S3Client(clientConfig);
     s3_client = &client;
+
     Aws::S3::Model::GetObjectRequest object_request;
     object_request.WithBucket(bucket_name).WithKey(key_name);
 
@@ -48,15 +65,21 @@ void S3Source::setup(ServerInterface &srvInterface) {
         return stream;
     });
 
-    std::cout << "Making call" << std::endl;
+    if (verbose) {
+        std::cout << "Making call for " << key_name << std::endl;
+    }
     Aws::S3::Model::GetObjectOutcome get_object_outcome = s3_client->GetObject(object_request);
 
     if (get_object_outcome.IsSuccess()) {
-        std::cout << "success, getting body" << std::endl;
+        std::cout << "success, getting body for " << key_name << std::endl;
         result = get_object_outcome.GetResultWithOwnership();
         stream->seekg(0, std::ios::end);
         int size = stream->tellg();
-        std::cout << "Size of body " << size << " Size of Content " << get_object_outcome.GetResult().GetContentLength() << " tell G " << result.GetBody().tellg() << std::endl;
+        if (verbose) {
+            std::cout << "Size of body " << size << " Size of Content "
+                      << get_object_outcome.GetResult().GetContentLength() << " tell G " << result.GetBody().tellg()
+                      << std::endl;
+        }
         stream->seekg(0, std::ios::beg);
     } else {
         std::cout << "GetObject error: " <<

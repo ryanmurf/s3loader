@@ -4,11 +4,13 @@
 #include "Vertica.h"
 #include <aws/s3/S3Client.h>
 #include <aws/core/Aws.h>
+#include <aws/core/auth/AWSCredentialsProvider.h>
 
 using namespace Vertica;
 
 class S3Source : public UDSource {
 private:
+    bool verbose = false;
     Aws::SDKOptions options;
     Aws::String bucket_name;
     Aws::String key_name;
