@@ -17,4 +17,7 @@ include_directories(/opt/vertica/sdk/include/)
 
 set(SOURCE_FILES s3loader.cpp s3loader.h)
 add_library(s3loader SHARED ${SOURCE_FILES} /opt/vertica/sdk/include/Vertica.cpp /opt/vertica/sdk/include/BuildInfo.h)
-target_link_libraries(s3loader aws-cpp-sdk-s3 Intl)
+target_link_libraries(s3loader aws-cpp-sdk-s3)
+IF(APPLE)
+    target_link_libraries(s3loader Intl)
+endif()
