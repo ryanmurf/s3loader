@@ -27,10 +27,15 @@ StreamState S3Source::process(ServerInterface &srvInterface, DataBuffer &output)
 }
 
 void S3Source::setup(ServerInterface &srvInterface) {
-    std::string id = srvInterface.getUDSessionParamReader().getStringRef("aws_id").str();
-    std::string secret = srvInterface.getUDSessionParamReader().getStringRef("aws_secret").str();
-    verbose = srvInterface.getUDSessionParamReader().getBoolRef("aws_verbose");
-    std::string endpoint = srvInterface.getUDSessionParamReader().getStringRef("aws_endpoint").str();
+    ParamReader pSessionParams = srvInterface.getUDSessionParamReader("library");
+    std::string id = pSessionParams.containsParameter("aws_id")?
+                     pSessionParams.getStringRef("aws_id").str(): "";
+    std::string secret = pSessionParams.containsParameter("aws_secret")?
+                         pSessionParams.getStringRef("aws_secret").str(): "";
+    verbose = pSessionParams.containsParameter("aws_verbose")?
+              pSessionParams.getBoolRef("aws_verbose"): false;
+    std::string endpoint = pSessionParams.containsParameter("aws_endpoint")?
+                           pSessionParams.getStringRef("aws_endpoint").str(): "";
 
     if (verbose) {
         std::cout << "Setting up API for " << key_name << std::endl;
