@@ -59,9 +59,9 @@ public:
     MockServerImpl(VTAllocator *allocator, LoggingFunc func, const std::string &sqlName, const ParamReader& paramReader, vint udxDebugLogLevel = 0)
             : ServerInterface(allocator, func, sqlName, paramReader, udxDebugLogLevel) {
     }
-    MockServerImpl(VTAllocator *allocator, LoggingFunc func, const std::string &sqlName, const ParamReader& paramReader, const ParamReader& sessionParamReader, vint udxDebugLogLevel = 0)
+    MockServerImpl(VTAllocator *allocator, LoggingFunc func, const std::string &sqlName, const ParamReader& paramReader, ParamReader& sessionParamReader, vint udxDebugLogLevel = 0)
             : ServerInterface(allocator, func, sqlName, paramReader, udxDebugLogLevel) {
-        this->sessionParamReader = sessionParamReader;
+        this->udSessionParamReaderMap.addUDSessionParamReader("library", sessionParamReader);
     }
     //MOCK_METHOD0(getParamReader, ParamReader());
     MOCK_METHOD1(getFileSystem, UDFileSystem*(const char *path));
@@ -114,12 +114,16 @@ TEST(library, construct) {
 TEST(library, download) {
     //id
     char id[] = "";
+    char secret[] = "";
+    char endpoint[] = "";
+    char tempfile[] = "";
+    std::string s3uri = "";
     EE::StringValue *sId = (EE::StringValue *)malloc(sizeof(EE::StringValue) + sizeof(id) * sizeof(char) + 1);
     sId->slen = sizeof(id) - 1;
     sId->sloc = 0;
     std::memcpy(&sId->base, &id[0], sizeof(id));
     //secret
-    char secret[] = "";
+
     EE::StringValue *sSecret = (EE::StringValue *)malloc(sizeof(EE::StringValue) + sizeof(secret) * sizeof(char) + 1);
     sSecret->slen = sizeof(secret) - 1;
     sSecret->sloc = 0;
@@ -128,7 +132,7 @@ TEST(library, download) {
     vbool bVerbose = true;
 
     //endpoint
-    char endpoint[] = "";
+
     EE::StringValue *sEndpoint = (EE::StringValue *)malloc(sizeof(EE::StringValue) + sizeof(endpoint) * sizeof(char) + 1);
     sEndpoint->slen = sizeof(endpoint) - 1;
     sEndpoint->sloc = 0;
@@ -156,7 +160,7 @@ TEST(library, download) {
     MockVTAllocator mockVTAllocator;
     ServerInterface::LoggingFunc func;
     MockServerImpl mockServer(&mockVTAllocator, func, std::string("string"), mockParamReader, mockParamReader, 0);
-    S3Source s3Source("");
+    S3Source s3Source(s3uri);
     s3Source.setup(mockServer);
 
     DataBuffer dataBuffer;
@@ -165,15 +169,18 @@ TEST(library, download) {
     dataBuffer.offset = 0;
     dataBuffer.size = 10240;
 
-    FILE* file = fopen( "test.bin", "wb" );
-
-    while(s3Source.processWithMetadata(mockServer, dataBuffer, lengthBuffer) == OUTPUT_NEEDED) {
-        size_t read = 0;
-        while (read != dataBuffer.offset) {
-            read = fwrite( dataBuffer.buf + read, sizeof(char), dataBuffer.offset, file );
+    FILE* file = fopen(tempfile, "wb" );
+    long total = 0;
+    while(s3Source.processWithMetadata(mockServer, dataBuffer, lengthBuffer) != DONE) {
+        if (dataBuffer.offset > 0) {
+            total += fwrite(dataBuffer.buf, sizeof(char), dataBuffer.offset, file);
+            dataBuffer.offset = 0;
         }
     }
 
+    total += fwrite(dataBuffer.buf, sizeof(char), dataBuffer.offset, file);
+    std::cout << total << " Bytes written to file\n" << "Cleanup" << std::endl;
+    GTEST_ASSERT_EQ(total, s3Source.totalBytes);
     delete dataBuffer.buf;
     fclose(file);
     s3Source.destroy(mockServer);

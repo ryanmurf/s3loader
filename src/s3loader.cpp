@@ -1,7 +1,6 @@
 #include "s3loader.h"
 
-#include <aws/s3/model/GetObjectRequest.h>
-#include <fstream>
+
 
 using namespace Vertica;
 
@@ -19,8 +18,47 @@ S3Source::S3Source(std::string url) {
 }
 
 StreamState S3Source::process(ServerInterface &srvInterface, DataBuffer &output) {
-    output.offset = result.GetBody().readsome(output.buf, output.size);
-    if (result.GetBody().eof() || result.GetBody().bad() || output.offset == 0) {
+    auto status = transferHandleShdPtr.get()->GetStatus();
+    if (status == Aws::Transfer::TransferStatus::NOT_STARTED ||
+            status == Aws::Transfer::TransferStatus::IN_PROGRESS) {
+        return KEEP_GOING;
+    } else if (status == Aws::Transfer::TransferStatus::COMPLETED) {
+        if (handle == NULL) {
+            if (verbose) {
+                std::cout << "Opening File " << this->sTmpfileName << std::endl;
+            }
+            handle = std::fopen(this->sTmpfileName.c_str(), "r");
+            if (handle == NULL) {
+                vt_report_error(0, "Error opening file [%s]", this->sTmpfileName.c_str());
+            }
+            fseek (handle , 0 , SEEK_END);
+            long fileSize = ftell (handle);
+            if (verbose) {
+                std::cout << "Size of Download " << fileSize << std::endl;
+            }
+            rewind (handle);
+            if (transferHandleShdPtr.get()->GetBytesTotalSize() != transferHandleShdPtr.get()->GetBytesTransferred() ||
+                transferHandleShdPtr.get()->GetBytesTransferred() != fileSize) {
+                vt_report_error(0,
+                                "Bytes reported by s3 [%u] doesn't match bytes read from s3 [%u] or doesn't match file size of [%u]",
+                                transferHandleShdPtr.get()->GetBytesTotalSize(),
+                                transferHandleShdPtr.get()->GetBytesTransferred(), fileSize);
+            }
+        }
+        output.offset += fread(output.buf + output.offset, 1, output.size - output.offset, handle);
+        this->totalBytes += output.offset;
+        if (feof(handle)) {
+            return DONE;
+        } else {
+            return OUTPUT_NEEDED;
+        }
+    } else if (status == Aws::Transfer::TransferStatus::FAILED) {
+        std::cout << "FAILED RESTARTING" << std::endl;
+        transferHandleShdPtr.get()->Restart();
+        return KEEP_GOING;
+    } else if (status == Aws::Transfer::TransferStatus::ABORTED ||
+            status == Aws::Transfer::TransferStatus::CANCELED) {
+        std::cout << "ABORTED or CANCELED RESTARTING" << std::endl;
         return DONE;
     }
     return OUTPUT_NEEDED;
@@ -28,14 +66,14 @@ StreamState S3Source::process(ServerInterface &srvInterface, DataBuffer &output)
 
 void S3Source::setup(ServerInterface &srvInterface) {
     ParamReader pSessionParams = srvInterface.getUDSessionParamReader("library");
-    std::string id = pSessionParams.containsParameter("aws_id")?
-                     pSessionParams.getStringRef("aws_id").str(): "";
-    std::string secret = pSessionParams.containsParameter("aws_secret")?
-                         pSessionParams.getStringRef("aws_secret").str(): "";
-    verbose = pSessionParams.containsParameter("aws_verbose")?
-              pSessionParams.getBoolRef("aws_verbose"): false;
-    std::string endpoint = pSessionParams.containsParameter("aws_endpoint")?
-                           pSessionParams.getStringRef("aws_endpoint").str(): "";
+    std::string id = pSessionParams.containsParameter("aws_id") ?
+                     pSessionParams.getStringRef("aws_id").str() : "";
+    std::string secret = pSessionParams.containsParameter("aws_secret") ?
+                         pSessionParams.getStringRef("aws_secret").str() : "";
+    verbose = pSessionParams.containsParameter("aws_verbose") ?
+              pSessionParams.getBoolRef("aws_verbose") : false;
+    std::string endpoint = pSessionParams.containsParameter("aws_endpoint") ?
+                           pSessionParams.getStringRef("aws_endpoint").str() : "";
 
     if (verbose) {
         std::cout << "Setting up API for " << key_name << std::endl;
@@ -58,43 +96,37 @@ void S3Source::setup(ServerInterface &srvInterface) {
 
     Aws::Auth::AWSCredentials credentials(Aws::Utils::StringUtils::to_string(id),
                                           Aws::Utils::StringUtils::to_string(secret));
-    Aws::S3::S3Client client = (!id.empty() && !secret.empty()) ? Aws::S3::S3Client(credentials, clientConfig)
-                                                                : Aws::S3::S3Client(clientConfig);
-    s3_client = &client;
-
-    Aws::S3::Model::GetObjectRequest object_request;
-    object_request.WithBucket(bucket_name).WithKey(key_name);
-
-    stream = Aws::New<Aws::StringStream>("s3buffer");
-    object_request.SetResponseStreamFactory([this]() {
-        return stream;
-    });
+    auto s3Client = (!id.empty() && !secret.empty()) ? Aws::MakeShared<Aws::S3::S3Client>("main", credentials,
+                                                                                          clientConfig)
+                                                     : Aws::MakeShared<Aws::S3::S3Client>("main", clientConfig);
+    Aws::Transfer::TransferManagerConfiguration transferConfig;
+    transferConfig.s3Client = s3Client;
 
     if (verbose) {
-        std::cout << "Making call for " << key_name << std::endl;
+        std::cout << "Initializing transfer client for " << key_name << std::endl;
     }
-    Aws::S3::Model::GetObjectOutcome get_object_outcome = s3_client->GetObject(object_request);
 
-    if (get_object_outcome.IsSuccess()) {
-        std::cout << "success, getting body for " << key_name << std::endl;
-        result = get_object_outcome.GetResultWithOwnership();
-        stream->seekg(0, std::ios::end);
-        int size = stream->tellg();
-        if (verbose) {
-            std::cout << "Size of body " << size << " Size of Content "
-                      << get_object_outcome.GetResult().GetContentLength() << " tell G " << result.GetBody().tellg()
-                      << std::endl;
-        }
-        stream->seekg(0, std::ios::beg);
-    } else {
-        std::cout << "GetObject error: " <<
-                  get_object_outcome.GetError().GetExceptionName() << " " <<
-                  get_object_outcome.GetError().GetMessage() << std::endl;
+    transferManagerShdPtr = Aws::Transfer::TransferManager::Create(transferConfig);
+    Aws::Transfer::DownloadConfiguration downloadConfiguration;
+
+    //Using a file is going to be slow. Need to use CreateDownloadStreamCallback. Need it to use a piped buffer stream,
+    //so that the manager can write to it (different thread) and the main thread can load it to vertica. The read and
+    //write need to be thread safe and block until bytes are available. Early attempts at this have resulted in failure
+    //because as soon as the transfer completes the stringstream becomes corrupted.
+    transferHandleShdPtr = transferManagerShdPtr.get()->DownloadFile(this->bucket_name, this->key_name,
+                                                                     this->sTmpfileName,
+                                                                     downloadConfiguration);
+    handle = NULL;
+    if (verbose) {
+        std::cout << "Started transfer for " << key_name << std::endl;
     }
+
 }
 
 void S3Source::destroy(ServerInterface &srvInterface) {
     Aws::ShutdownAPI(options);
+    fclose(handle);
+    remove(this->sTmpfileName.c_str());
 }
 
 Aws::String S3Source::getBucket() {
