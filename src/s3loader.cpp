@@ -52,15 +52,24 @@ StreamState S3Source::process(ServerInterface &srvInterface, DataBuffer &output)
         } else {
             return OUTPUT_NEEDED;
         }
-    } else if (status == Aws::Transfer::TransferStatus::FAILED) {
-        std::cout << "FAILED RESTARTING" << std::endl;
-        transferHandleShdPtr.get()->Restart();
-        return KEEP_GOING;
+    } else if (status == Aws::Transfer::TransferStatus::FAILED && lastStatus != Aws::Transfer::TransferStatus::FAILED) {
+        std::cout << "FAILED Try " << retryCount << " RESTARTING" << std::endl;
+        std::cout << "Status Code: " << static_cast<int >(transferHandleShdPtr.get()->GetLastError().GetResponseCode()) << std::endl;
+        std::cout << transferHandleShdPtr.get()->GetLastError().GetExceptionName() << std::endl;
+        std::cout << transferHandleShdPtr.get()->GetLastError().GetMessage() << std::endl;
+        if (retryCount < 4) {
+            transferManagerShdPtr.get()->RetryDownload(transferHandleShdPtr);
+            retryCount++;
+            return KEEP_GOING;
+        } else {
+            return DONE;
+        }
     } else if (status == Aws::Transfer::TransferStatus::ABORTED ||
             status == Aws::Transfer::TransferStatus::CANCELED) {
         std::cout << "ABORTED or CANCELED RESTARTING" << std::endl;
         return DONE;
     }
+    lastStatus = status;
     return OUTPUT_NEEDED;
 }
 
@@ -116,6 +125,7 @@ void S3Source::setup(ServerInterface &srvInterface) {
     transferHandleShdPtr = transferManagerShdPtr.get()->DownloadFile(this->bucket_name, this->key_name,
                                                                      this->sTmpfileName,
                                                                      downloadConfiguration);
+    lastStatus = transferHandleShdPtr.get()->GetStatus();
     handle = NULL;
     if (verbose) {
         std::cout << "Started transfer for " << key_name << std::endl;

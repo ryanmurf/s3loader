@@ -24,6 +24,9 @@ private:
     std::shared_ptr<Aws::Transfer::TransferManager> transferManagerShdPtr;
     std::shared_ptr<Aws::Transfer::TransferHandle> transferHandleShdPtr;
 
+    long retryCount = 0;
+    Aws::Transfer::TransferStatus lastStatus;
+
     FILE *handle;
 
     virtual StreamState process(ServerInterface &srvInterface, DataBuffer &output);
