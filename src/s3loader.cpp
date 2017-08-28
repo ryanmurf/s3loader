@@ -54,10 +54,10 @@ StreamState S3Source::process(ServerInterface &srvInterface, DataBuffer &output)
         }
     } else if (status == Aws::Transfer::TransferStatus::FAILED && lastStatus != Aws::Transfer::TransferStatus::FAILED) {
         std::cout << "FAILED Try " << retryCount << " RESTARTING" << std::endl;
-        std::cout << "Status Code: " << static_cast<int >(transferHandleShdPtr.get()->GetLastError().GetResponseCode()) << std::endl;
+        std::cout << "Status Code: " << m[transferHandleShdPtr.get()->GetLastError().GetResponseCode()] << std::endl;
         std::cout << transferHandleShdPtr.get()->GetLastError().GetExceptionName() << std::endl;
         std::cout << transferHandleShdPtr.get()->GetLastError().GetMessage() << std::endl;
-        if (retryCount < 4) {
+        if (retryCount < 2) {
             transferManagerShdPtr.get()->RetryDownload(transferHandleShdPtr);
             retryCount++;
             return KEEP_GOING;
