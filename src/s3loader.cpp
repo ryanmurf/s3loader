@@ -55,12 +55,12 @@ StreamState S3Source::process(ServerInterface &srvInterface, DataBuffer &output)
         std::cout << "Status Code: " << m[transferHandleShdPtr.get()->GetLastError().GetResponseCode()] << std::endl;
         std::cout << transferHandleShdPtr.get()->GetLastError().GetExceptionName() << std::endl;
         std::cout << transferHandleShdPtr.get()->GetLastError().GetMessage() << std::endl;
-        if (retryCount < 1) {
+        if (retryCount < 2) {
             transferManagerShdPtr.get()->RetryDownload(transferHandleShdPtr);
             retryCount++;
             return KEEP_GOING;
         } else {
-            return DONE;
+            vt_report_error(0, "Max number of retries reached, download failed.");
         }
     } else if (status == Aws::Transfer::TransferStatus::ABORTED ||
             status == Aws::Transfer::TransferStatus::CANCELED) {
@@ -128,7 +128,6 @@ void S3Source::setup(ServerInterface &srvInterface) {
     if (verbose) {
         std::cout << "Started transfer for " << key_name << std::endl;
     }
-
 }
 
 void S3Source::destroy(ServerInterface &srvInterface) {
