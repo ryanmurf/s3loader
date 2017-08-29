@@ -1,7 +1,5 @@
 #include "s3loader.h"
 
-
-
 using namespace Vertica;
 
 S3Source::S3Source(std::string url) {
@@ -57,7 +55,7 @@ StreamState S3Source::process(ServerInterface &srvInterface, DataBuffer &output)
         std::cout << "Status Code: " << m[transferHandleShdPtr.get()->GetLastError().GetResponseCode()] << std::endl;
         std::cout << transferHandleShdPtr.get()->GetLastError().GetExceptionName() << std::endl;
         std::cout << transferHandleShdPtr.get()->GetLastError().GetMessage() << std::endl;
-        if (retryCount < 2) {
+        if (retryCount < 1) {
             transferManagerShdPtr.get()->RetryDownload(transferHandleShdPtr);
             retryCount++;
             return KEEP_GOING;
@@ -88,8 +86,6 @@ void S3Source::setup(ServerInterface &srvInterface) {
         std::cout << "Setting up API for " << key_name << std::endl;
     }
 
-    Aws::InitAPI(options);
-
     Aws::Client::ClientConfiguration clientConfig;
     clientConfig.scheme = Aws::Http::Scheme::HTTPS;
     clientConfig.region = Aws::Region::US_EAST_1;
@@ -100,8 +96,10 @@ void S3Source::setup(ServerInterface &srvInterface) {
     }
 
     if (verbose) {
-        std::cout << "Initializing client for " << key_name << std::endl;
+        std::cout << "Starting client for " << key_name << std::endl;
     }
+
+    Init& init = Init::getInstance();
 
     Aws::Auth::AWSCredentials credentials(Aws::Utils::StringUtils::to_string(id),
                                           Aws::Utils::StringUtils::to_string(secret));
@@ -134,7 +132,9 @@ void S3Source::setup(ServerInterface &srvInterface) {
 }
 
 void S3Source::destroy(ServerInterface &srvInterface) {
-    Aws::ShutdownAPI(options);
+    if (verbose) {
+        std::cout << "destroy : closing aws api and removing file for " << key_name << std::endl;
+    }
     fclose(handle);
     remove(this->sTmpfileName.c_str());
 }

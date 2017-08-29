@@ -90,10 +90,40 @@ std::map<Aws::Http::HttpResponseCode, std::string> m = {
         {Aws::Http::HttpResponseCode::NETWORK_READ_TIMEOUT, "NETWORK_READ_TIMEOUT: 598"},
         {Aws::Http::HttpResponseCode::NETWORK_CONNECT_TIMEOUT, "NETWORK_CONNECT_TIMEOUT: 599"}};
 
+class Init
+{
+public:
+    static Init& getInstance()
+    {
+        static Init instance; // Guaranteed to be destroyed.
+        // Instantiated on first use.
+        return instance;
+    }
+private:
+    Aws::SDKOptions options;
+    Init() {
+        std::cout << "Starting Aws::InitAPI" << std::endl;
+        Aws::InitAPI(options);
+    }
+
+    ~Init() {
+        std::cout << "Shutting down Aws::ShutdownAPI" << std::endl;
+        Aws::ShutdownAPI(options);
+    }
+
+    // C++ 11
+    // =======
+    // We can use the better technique of deleting the methods
+    // we don't want.
+public:
+    Init(Init const&) = delete;
+    void operator=(Init const&) = delete;
+};
+
 class S3Source : public UDSource {
 private:
     bool verbose = false;
-    Aws::SDKOptions options;
+
     Aws::String bucket_name;
     Aws::String key_name;
     Aws::String sTmpfileName = std::tmpnam(nullptr);
